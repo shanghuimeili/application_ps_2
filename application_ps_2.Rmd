@@ -1,0 +1,498 @@
+---
+title: "Applied Problem Set 2"
+author: "Sabrina Li"
+date: "29/03/2020"
+output: 
+  pdf_document:
+    
+    number_sections: yes
+  html_document:
+    df_print: paged
+urlcolor: blue
+---
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+Sys.setlocale(locale = 'USA')
+# install.packages('testthat')
+library(testthat)
+library(tidyverse)
+library(lubridate)
+
+```
+
+<!-- .Rmd files use  markdown, a text mark up language, to provide formating.--> 
+<!--Text include within these strange arrows are comments and will not show up when you knit-->
+
+# Front matter
+This submission is my work alone and complies with the 30535 integrity policy.
+
+Add your initials to indicate your agreement: **__**
+
+Add your collaborators: **__**
+
+Late coins used this pset: 0. Late coins left: X. 
+<!--You may use up to two for a given assignment.)-->
+
+# Problems
+
+## Part 1
+
+### 1.1
+
+####  1
+```{r}
+# Part 1
+
+## 1
+system.time({
+  
+  sp = read.csv('parking_tickets_one_percent.csv')
+  
+})
+
+
+
+test_that('row number', expect_equal(nrow(sp), 287458))
+
+```
+
+####  2
+
+```{r}
+
+infs = file.info('parking_tickets_one_percent.csv')
+size_mb = infs$size / 1024 /1024
+size_mb # mb
+
+
+size_mb * 100 # population size
+
+
+```
+
+
+####  3
+
+it seems ordered by issue_date (ascending), but there is exceptations.
+
+```{r}
+sp %>% head()
+
+(sp$issue_date %>% ymd_hms() %>% diff() < 0) %>% sum()
+```
+
+
+####  4
+
+```{r}
+
+sapply(sp, function(x) sum(is.na(x))) %>% sort() -> missbycol
+missbycol
+```
+
+####  5
+
+```{r}
+missbycol %>% tail(3)
+
+```
+
+- zipcodes may be privacy
+
+- existing of other two ones are not necessary
+
+### 1.2
+
+####  1
+```{r}
+library(lubridate)
+
+sp$issue_date %>% ymd_hms() -> sp$ymd
+
+(sp$ymd %>% year() == 2007) %>% sum() # 2007
+
+
+table(sp$ymd %>% year()) # different years
+```
+
+About 200,000 tickets were issued in both 2011 and 2014, for example, and revenue increased from about $21 million to $25 million. There were also similar numbers of tickets issued in 2007 and 2015 — about 250,000 tickets. Revenue jumped from about $25 million to $32 million.
+
+The difference is not so large, but there is descending trend.
+
+
+
+####  2
+
+```{r}
+t20 = sp$violation_description %>%  table() %>% sort() %>% tail(20) %>% names()
+sp %>%  filter(violation_description %in% t20) %>%
+  ggplot(aes(violation_description, 
+             fill = violation_description)) + 
+  geom_bar() + theme(axis.title.x=element_blank(),
+                     axis.text.x=element_blank(),
+                     axis.ticks.x=element_blank()) + labs(title = 'bar plot')
+                                  
+```
+
+
+
+
+
+### 1.3
+
+####  1
+```{r}
+sp$unit %>% is.na() %>% sum() # nums of unit missing 
+```
+
+####  2
+
+```{r}
+uit = read.csv('unit_key.csv', skip = 2)
+
+# uit  %>% head()
+uit$Reporting.District %>% length()
+uit$unit = uit$Reporting.District %>% as.numeric() # units
+uit[uit$unit %>% is.na() == F,] -> uit
+uit$unit %>% unique() %>% length() # nums of units
+
+```
+
+
+####  3
+
+```{r}
+
+left_join(sp, uit, by = 'unit') -> joinunit
+sapply(uit, function(x) sum(is.na(x))) %>% 
+  sort() # check missing value
+
+joinunit$Department.Name %>% is.na() %>% 
+  sum() # rows in the tickets data do not have a match
+
+nrow(joinunit) - joinunit$Department.Name %>% 
+  is.na() %>% sum() # # rows in the tickets data have a match
+
+(uit$unit %in% joinunit$unit) %>%
+  sum() # rows in the unit table have a match
+
+(uit$unit %in% joinunit$unit == F) %>%
+  sum()  # rows in the unit table do not  have a match
+
+
+
+```
+
+#### 4
+
+```{r}
+lapply(sp$unit_description, function(x){
+  strsplit(x, '-')[[1]][1]
+}) %>% unlist() -> joinunit$unit_gen
+
+
+table(joinunit$unit_gen)[1:2] # count for two orgs.
+
+joinunit[joinunit$unit_gen == 'CPD',] ->sub_chi
+sub_chi$Department.Description %>% table() %>% sort() %>% 
+  tail(5) # top five depts in Chicago
+
+```
+
+
+
+
+### 1.4
+
+
+```{r}
+zipdf = read.csv('chi_zips.csv')
+colnames(zipdf) ='GEOID'
+library(tidycensus)
+
+census_api_key("f51cd09bd6d0f8cdc620d3c64a5f7893c2efebe1")
+lkup = load_variables(year = 2017,dataset = "acs5")
+lkup$concept %>% grepl( pattern = 'black', x = ., ignore.case = T) %>% which() -> ids
+lkup[ids,] -> xx
+
+acs_data <- get_acs(
+  geography = "zip code tabulation area",
+  variables = c("B01001_001","B19013_001", "B01001B_001"),
+  year = 2019,
+  geometry = FALSE
+)  # down load
+
+acs_data %>% head()
+
+# acs_data$GEOID = as.integer(acs_data$GEOID)
+colnames(acs_data)[1] = 'zipcode'
+
+cens = pivot_wider(acs_data,id_cols = zipcode, 
+                   names_from = variable, values_from = estimate)
+colnames(cens)[2:4] =c('population', 'income', 'balck')
+cens$balck = cens$balck / cens$population
+
+cens %>% head() # clean 
+cens_join = left_join(joinunit, cens, by = 'zipcode' )
+
+cens_join %>% filter(ticket_queue != 'Paid') %>% filter(zipcode %>% is.na() == F)%>% 
+  group_by(zipcode) %>% 
+  summarise(count = n()) %>% arrange(desc(count)) %>% 
+  head(3) %>% select(zipcode) # top 3 neigborhoods
+
+```
+
+
+
+## Part 2
+
+#### 2.1.1
+
+```{r}
+sp[sp$ticket_queue == 'Notice',] -> notpay
+double_pay = ((notpay$current_amount_due + 
+                 notpay$total_payments) >=  2* notpay$fine_level1_amount) 
+table(double_pay) # not hold for all
+
+not_not = notpay[double_pay == F,]
+not_100 =not_not[(not_not$current_amount_due +
+                    not_not$total_payments) >= 100, ]
+head(not_100) # sample
+
+```
+
+it does Not hold for all. if not unpaid, price will doubled, and have other fees.
+
+#### 2.1.2
+
+```{r, dev='png'}
+notpay$notice_level %>% table() %>% sort() %>%
+  rev() %>% names() -> proces
+proces # process
+# install.packages('DiagrammeR')
+DiagrammeR::grViz("digraph {
+
+graph[layout = dot, rankdir = LR]
+
+SEIZ
+DLS
+FINL
+VIOL
+DETR
+
+SEIZ -> DLS -> FINL ->VIOL ->DETR
+}")
+
+```
+
+I assume the later the process, the fewer the notices numbers.
+
+
+#### 2.1.3
+
+```{r}
+sp %>% group_by(violation_description) %>%
+  summarise(n_code = unique(violation_code)%>%
+              length()) %>% filter(n_code > 1) ->multicode
+
+multicode
+
+sp[sp$violation_description %in% multicode$violation_description ,] -> mutidf
+
+table(mutidf$violation_description, mutidf$violation_code)
+
+```
+
+
+
+
+### 2.1.4
+
+```{r}
+sp %>% group_by(violation_code) %>% 
+  summarise(n_desc = unique(violation_description)%>% 
+              length()) %>% filter(n_desc > 1) ->multidesc
+
+multidesc
+
+sp[sp$violation_code %in% multidesc$violation_code ,] -> mutidf
+
+table( mutidf$violation_code, mutidf$violation_description)
+```
+
+
+
+### 2.1.5
+
+```{r}
+table(sp$violation_description) %>%
+  sort() %>% tail(50)
+```
+
+for OBSTRUCT ROADWAY is too general and there is lots of detailed violation,for example, PARK OR STAND IN VIADUCT/UNDERPASS 
+
+
+### 2.2.1
+
+```{r}
+sp$violation_description %>% 
+  grepl('NO CITY STICKER', . , ignore.case = T) -> ids
+citystk = sp[ids, ]
+citystk$violation_description %>% unique() # codes
+
+citystk = citystk[citystk$violation_description != 
+                    'NO CITY STICKER VEHICLE OVER 16,000 LBS.',]
+table(citystk$ymd %>% year(), citystk$violation_code) -> time_table
+time_table # old new codes according time.
+
+citystk %>% group_by(violation_code) %>% 
+  summarise(init_fee = unique(fine_level1_amount)) # initial price.
+
+
+```
+
+
+
+### 2.2.2
+
+```{r}
+
+time_table %>% apply(., 1, sum) -> time_table2
+plot(names(time_table2), time_table2, type = 'l', 
+     xlab = 'time', ylab = 'count',
+     main = 'number of missing sticker tickets  over time')
+
+
+
+```
+
+
+
+### 2.2.3
+
+```{r}
+citystk %>% ggplot(aes(ymd, fine_level1_amount, 
+                       color = violation_code)) + 
+  geom_line() + labs(title = 'cost in time')
+
+
+
+```
+
+about from 2012 spring.
+
+
+### 2.2.4
+
+```{r}
+
+citystk[citystk$ymd %>% year() == 2011,] %>% nrow() * (200 - 120)
+
+
+```
+revenue increases.
+
+### 2.2.5
+
+```{r}
+
+citystk$yr = citystk$ymd %>% year()
+citystk[citystk$yr %in% c(2011, 2012),] -> vorafter
+
+vorafter$paid = vorafter$ticket_queue == 'Paid'
+
+vorafter %>% group_by(yr, paid) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(id_cols = yr, names_from = paid, values_from = count) -> cont
+
+cont$rate = cont[,3] / (cont[,2] + cont[,3])
+
+cont$pay = cont$rate * c(120, 200)
+
+cont
+
+```
+
+
+
+### 2.2.6
+
+```{r}
+
+vorafter = citystk
+
+vorafter$paid = vorafter$ticket_queue == 'Paid'
+
+vorafter %>% group_by(yr, paid) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(id_cols = yr, names_from = paid, values_from = count) -> cont
+
+cont$rate = cont[,3] / (cont[,2] + cont[,3]) %>% unlist() %>% as.numeric()
+cont$rate = cont$rate[,1]
+cont = as.data.frame(cont)
+colnames(cont) = c('year', 'pay', 'no', 'rate')
+cont %>% ggplot(aes(year, rate)) + 
+  geom_line() +labs(title = 'repayment rate') +geom_vline(xintercept = 2012, 
+                                                          linetype="dotted", 
+                color = "blue", size=1.5)
+
+
+```
+
+
+The rate decreases over time, the degree increase largely after introducing new price.
+
+### 2.2.7
+
+```{r}
+
+sp = cens_join
+sp[sp$ymd %>%year() == 2011, ] -> df11
+
+df11$violation_code %>% table() %>% sort() %>% tail(3)
+df11$violation_description %>% table() %>% sort() %>% tail(3)
+
+df11$pay = df11$ticket_queue == 'Paid'
+df11 %>% group_by(violation_code) %>% 
+  summarise(recv = sum(pay) / n() * unique(fine_level1_amount) ) %>%
+  arrange(recv) %>% tail(3) -> top3
+top3
+
+```
+
+
+
+### 2.2.8
+
+```{r}
+df11$high_income = df11$income >  median(df11$income, na.rm = T)
+
+df11 = df11[df11$zipcode %>% is.na() == F,]
+df11 = df11[df11$high_income %>% is.na() == F,]
+diff_df = df11 %>% group_by(high_income, violation_code) %>% 
+  summarise(count = n()) %>% 
+  pivot_wider(id_cols = violation_code, 
+              names_from = high_income , values_from = count)
+
+diff_df$diff = diff_df$`TRUE` - diff_df$`FALSE`
+diff_df %>% arrange(diff %>% desc()) %>% head(3) -> rich_top3
+colnames(rich_top3)[2:3] =c('low', 'high')
+rich_top3 %>% pivot_longer(cols = c('low', 'high')) %>% 
+  ggplot( aes(x = violation_code , y = value, fill = name)) +
+  geom_bar(stat = "identity", position = 'dodge') +
+  labs(title = 'most different violations')
+
+
+
+citystk = df11[df11$violation_code %in% rich_top3$violation_code,]
+citystk$yr = citystk$ymd %>% year()
+# citystk[citystk$yr %in% c(2011, 2012),] -> vorafter
+vorafter = citystk
+vorafter$paid = vorafter$ticket_queue == 'Paid'
+
+vorafter %>% group_by(yr, paid) %>% summarise(count = n()) %>% 
+  pivot_wider(id_cols = yr, names_from = paid, values_from = count) -> cont
+as.numeric(cont[,3] * 80 )
+
+
+```
